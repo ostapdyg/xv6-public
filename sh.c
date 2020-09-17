@@ -52,6 +52,24 @@ struct backcmd {
 int fork1(void);  // Fork but panics on failure.
 void panic(char*);
 struct cmd *parsecmd(char*);
+char *fmtline(char*);
+
+// ---------------------------------------------------------------------------------
+
+char *PATH = "/:/bin/:./";
+
+int file_exists(char *f)
+{
+  int fd;
+  if ((fd = open(f, O_RDONLY)) < 0)
+  {
+    return 0;
+  }
+  close(fd);
+  return 1;
+}
+// ---------------------------------------------------------------------------------
+
 
 // Execute cmd.  Never returns.
 void
@@ -75,6 +93,38 @@ runcmd(struct cmd *cmd)
     ecmd = (struct execcmd*)cmd;
     if(ecmd->argv[0] == 0)
       exit();
+    // ---------------------------------------------------------------------------------
+    static char fs[100];
+    char* path_ptr = PATH;
+    while (*path_ptr)
+    {
+      //Copy dir path from PATH and program name into filename
+      char* f = fs;
+      while ((*path_ptr) && (*path_ptr != ':'))
+      {
+        *f = *path_ptr;
+        path_ptr++;
+        f++;
+      }
+      if (*path_ptr == ':')
+      {
+        path_ptr++;
+      }
+      strcpy(f, ecmd->argv[0]);
+      // printf(1, "Trying %s\n", fs);
+      if (file_exists(fs))
+      {
+        ecmd->argv[0] = fs;
+        break;
+      }
+    }
+    if (!file_exists(fs))
+    {
+      printf(2, "File %s not found\n", ecmd->argv[0]);
+      break;
+    }
+    ecmd->argv[0] = fs;
+    // ---------------------------------------------------------------------------------
     exec(ecmd->argv[0], ecmd->argv);
     printf(2, "exec %s failed\n", ecmd->argv[0]);
     break;
@@ -165,7 +215,8 @@ main(void)
       continue;
     }
     if(fork1() == 0)
-      runcmd(parsecmd(buf));
+      // runcmd(parsecmd(buf));
+      runcmd(parsecmd(fmtline(buf)));
     wait();
   }
   exit();
@@ -261,6 +312,100 @@ backcmd(struct cmd *subcmd)
 
 char whitespace[] = " \t\r\n\v";
 char symbols[] = "<|>&;()";
+// ---------------------------------------------------------------------------------
+char fmtsymbols[] = "$\\";
+char varend[] = "$";
+
+char *getvar(char *varname);
+int is_alphanumeric(char c);
+
+char *fmtline(char *s)
+{
+  static char rs[255];
+  char *r = rs;
+  char *es = s + strlen(s);
+  while (*s)
+  {
+    while (*s && !strchr(fmtsymbols, *s))
+    {
+      *r = *s;
+      r++;
+      s++;
+    }
+    switch (*s)
+    {
+    case '\\'://Ignore \ and copy the next char as it is
+      s++;
+      *r = *s;
+      r++;
+      s++;
+      break;
+    case '$': //Replace next word with the value of a corresponding variabls
+      // if (r == rs || strchr(whitespace, *(s - 1))) //There must be whitespace before $VAR
+      // {                                            //Need to replace $VAR with its value
+      //   s++;
+      //   char *var_s = s;
+      //   while (s < es && !strchr(whitespace, *s)) //Find $VAR name end
+      //     s++;
+      //   char c_saved = *s;
+      //   *s = 0; //Temporarily set 0 to avoid aditional buffer
+      //   char *v = getvar(var_s);
+      //   while (*v)
+      //   {
+      //     *r = *v;
+      //     v++;
+      //     r++;
+      //   }
+      //   *s = c_saved; //Restore old *s value
+      //   *(r + 1) = 0;
+      // }
+
+      s++;
+      char *var_s = s;
+      while (s < es && is_alphanumeric(*s)) //Find $VAR name end
+        s++;
+      char c_saved = *s;
+      *s = 0; //Temporarily set 0 to avoid aditional buffer
+      char *v = getvar(var_s);
+      while (*v)
+      {
+        *r = *v;
+        v++;
+        r++;
+      }
+      *s = c_saved; //Restore old *s value
+      // *(r + 1) = 0; //Null-terminate
+      break;
+    default:
+      *r = *s;
+      r++;
+      s++;
+      break;
+    }
+    // *r = *s;
+    // r++;
+    // s++;
+    // *r = 0;
+    // printf(1,"After replacement: %s", rs);
+  }
+  *r = 0;//Null-terminate
+  return rs;
+}
+
+char *getvar(char *varname)
+{
+  if (!strcmp(varname, "PATH"))
+  {
+    return PATH;
+  }
+  return "";
+}
+
+int is_alphanumeric(char c){
+  return ('0'<=c && c<='9')||('a'<=c && c<='z')||('A'<=c && c<='Z');
+}
+
+// ---------------------------------------------------------------------------------
 
 int
 gettoken(char **ps, char *es, char **q, char **eq)
